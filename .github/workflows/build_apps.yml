@@ -3,7 +3,7 @@ name: Build Morphe + De-ReVanced Apps
 on:
   push:
     branches:
-      - master
+      - main
   schedule:
     - cron: "0 6 */2 * *"   # Every 2 days at 06:00 UTC
   workflow_dispatch:
@@ -643,5 +643,5 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore: update built versions state [skip ci]"
-          branch: master
+          branch: main
           file_pattern: ".github/last_built_versions.json .github/cert_pins.json"
