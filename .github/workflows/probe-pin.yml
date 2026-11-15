@@ -1,0 +1,21 @@
+name: probe-pin
+on:
+  workflow_dispatch:
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Test versionName pin on d.apkpure.net
+        run: |
+          test_pin () {
+            echo "== $1 @ $2"
+            curl -s -o /dev/null -w "  %{http_code} size=%{size_download} -> %{filename_effective}\n" -L --max-time 90 "https://d.apkpure.net/b/XAPK/$1?version=$2" || echo "  FAIL"
+          }
+          test_pin com.google.android.youtube 21.30.216
+          test_pin com.google.android.apps.youtube.music 9.30.53
+          test_pin com.reddit.frontpage 2026.40.0
+          test_pin com.instagram.android 452.1.0.53.64
+      - name: Test APK variant (b/APK) pinned
+        run: |
+          curl -s -o /dev/null -w "YTmusic APK pin: %{http_code} -> %{filename_effective}\n" -L --max-time 90 "https://d.apkpure.net/b/APK/com.google.android.apps.youtube.music?version=9.30.53" || echo FAIL
