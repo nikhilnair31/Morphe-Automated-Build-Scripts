@@ -1,0 +1,17 @@
+name: probe-apkpure-web
+on:
+  workflow_dispatch:
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Probe apkpure.com from runner
+        run: |
+          echo "== youtube app page"
+          curl -s -o /tmp/yt.html -w "%{http_code}\n" -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131 Safari/537.36" --max-time 30 "https://apkpure.com/youtube/com.google.android.youtube/versions"
+          grep -oE '"versionCode":[0-9]+|"versionName":"[^"]+"' /tmp/yt.html | head -10
+          echo "== d.apkpure 403 body check"
+          curl -s -A "Mozilla/5.0" "https://d.apkpure.net/b/XAPK/com.google.android.youtube?version=21.30.216" | head -c 300
+          echo; echo "== apkpure search api"
+          curl -s -o /tmp/api.json -w "%{http_code}\n" -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131" --max-time 30 "https://apkpure.com/api/v2/search/apps?keyword=youtube" ; head -c 200 /tmp/api.json
