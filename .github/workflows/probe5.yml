@@ -1,0 +1,40 @@
+name: probe5
+on:
+  workflow_dispatch:
+    inputs:
+      app:
+        description: "App"
+        required: true
+        default: "all"
+        type: choice
+        options: [all, reddit, twitter]
+      arch:
+        required: true
+        default: "arm64-v8a"
+        type: choice
+        options: [arm64-v8a, universal]
+      force_all:
+        required: false
+        default: false
+        type: boolean
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      x: ${{ steps.s.outputs.x }}
+    steps:
+      - id: s
+        env:
+          M: ${{ github.event.inputs.app || 'all' }}
+          F: ${{ github.event.inputs.force_all || 'false' }}
+        run: echo "x=$M-$F" >> $GITHUB_OUTPUT
+  b:
+    needs: a
+    if: needs.a.outputs.x != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - run: echo "${{ needs.a.outputs.x }}"
