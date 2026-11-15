@@ -5,6 +5,7 @@ REPO_MORPHE      = "MorpheApp/morphe-patches"
 REPO_DE_REVANCED = "RookieEnough/De-ReVanced"
 REPO_DE_VANCED   = "RookieEnough/De-Vanced"
 REPO_PIKO        = "crimera/piko"
+REPO_PIKO_NEWX   = "crimera/piko-newx"
 REPO_HOODLES     = "hoo-dles/morphe-patches"
 STATE_FILE       = ".github/last_built_versions.json"
 
@@ -14,7 +15,7 @@ APPS = {
     "music":          {"package": "com.google.android.apps.youtube.music",    "slug": "youtube-music",        "source": "morphe"},
     "reddit":         {"package": "com.reddit.frontpage",                     "slug": "reddit",               "source": "morphe"},
     # ── Piko patches ───────────────────────────────────────────
-    "twitter":        {"package": "com.twitter.android",                      "slug": "twitter-x",            "source": "piko"},
+    "twitter":        {"package": "com.twitter.android",                      "slug": "twitter",              "source": "piko_newx"},
     "instagram":      {"package": "com.instagram.android",                    "slug": "instagram",            "source": "piko"},
 }
 
@@ -186,6 +187,7 @@ def main():
     drvr_rel    = get_latest_release(REPO_DE_REVANCED)
     dvcd_rel    = get_latest_release(REPO_DE_VANCED)
     piko_rel    = get_latest_release(REPO_PIKO, include_prerelease=True)
+    piko_nx_rel = get_latest_release(REPO_PIKO_NEWX)
     hoodles_rel = get_latest_release(REPO_HOODLES)
 
     cli_tag     = cli_rel["tag_name"]
@@ -193,6 +195,7 @@ def main():
     drvr_tag    = drvr_rel["tag_name"]
     dvcd_tag    = dvcd_rel["tag_name"]
     piko_tag    = piko_rel["tag_name"] + (" (pre-release)" if piko_rel.get("_used_prerelease") else "")
+    piko_nx_tag = piko_nx_rel["tag_name"]
     hoodles_tag = hoodles_rel["tag_name"]
 
     cli_jar     = next((a for a in cli_rel["assets"]     if a["name"].endswith(".jar")), None)
@@ -200,6 +203,7 @@ def main():
     drvr_mpp    = next((a for a in drvr_rel["assets"]    if a["name"].endswith(".mpp")), None)
     dvcd_mpp    = next((a for a in dvcd_rel["assets"]    if a["name"].endswith(".mpp")), None)
     piko_mpp    = next((a for a in piko_rel["assets"]    if a["name"].endswith(".mpp")), None)
+    piko_nx_mpp = next((a for a in piko_nx_rel["assets"] if a["name"].endswith(".mpp")), None)
     hoodles_mpp = next((a for a in hoodles_rel["assets"] if a["name"].endswith(".mpp")), None)
 
     for label, asset in [("CLI jar", cli_jar), ("Morphe mpp", mor_mpp),
@@ -216,12 +220,13 @@ def main():
     print(f"Piko:             {piko_tag} ({piko_mpp['name']})")
     print(f"hoo-dles:         {hoodles_tag} ({hoodles_mpp['name']})")
 
-    for asset in [cli_jar, mor_mpp, drvr_mpp, dvcd_mpp, piko_mpp, hoodles_mpp]:
+    for asset in [cli_jar, mor_mpp, drvr_mpp, dvcd_mpp, piko_mpp, piko_nx_mpp, hoodles_mpp]:
         if not os.path.exists(asset["name"]):
             download_file(asset["browser_download_url"], asset["name"])
 
     source_to_mpp = {
         "morphe":      mor_mpp["name"],
+        "piko_newx":   piko_nx_mpp["name"],
         "de_revanced": drvr_mpp["name"],
         "de_vanced":   dvcd_mpp["name"],
         "piko":        piko_mpp["name"],
@@ -268,12 +273,14 @@ def main():
         set_output("de_vanced_tag",    dvcd_tag)
         set_output("piko_tag",         piko_tag)
         set_output("hoodles_tag",      hoodles_tag)
+        set_output("piko_newx_tag",  piko_nx_tag)
         set_output("cli_tag",          cli_tag)
         set_output("morphe_mpp",       mor_mpp["name"])
         set_output("de_revanced_mpp",  drvr_mpp["name"])
         set_output("de_vanced_mpp",    dvcd_mpp["name"])
         set_output("piko_mpp",         piko_mpp["name"])
         set_output("hoodles_mpp",      hoodles_mpp["name"])
+        set_output("piko_newx_mpp",  piko_nx_mpp["name"])
         set_output("cli_jar",          cli_jar["name"])
         set_output("target_arch",      target_arch)
         return
@@ -283,7 +290,7 @@ def main():
     current = {
         "cli_tag": cli_tag, "morphe_tag": mor_tag,
         "de_revanced_tag": drvr_tag, "de_vanced_tag": dvcd_tag,
-        "piko_tag": piko_tag, "hoodles_tag": hoodles_tag,
+        "piko_tag": piko_tag, "hoodles_tag": hoodles_tag, "piko_newx_tag": piko_nx_tag,
     }
 
     apps_to_build = []
@@ -305,9 +312,11 @@ def main():
             set_output("morphe_tag", mor_tag); set_output("de_revanced_tag", drvr_tag)
             set_output("de_vanced_tag", dvcd_tag); set_output("piko_tag", piko_tag)
             set_output("hoodles_tag", hoodles_tag); set_output("cli_tag", cli_tag)
+            set_output("piko_newx_tag", piko_nx_tag)
             set_output("morphe_mpp", mor_mpp["name"]); set_output("de_revanced_mpp", drvr_mpp["name"])
             set_output("de_vanced_mpp", dvcd_mpp["name"]); set_output("piko_mpp", piko_mpp["name"])
             set_output("hoodles_mpp", hoodles_mpp["name"]); set_output("cli_jar", cli_jar["name"])
+            set_output("piko_newx_mpp", piko_nx_mpp["name"])
             set_output("target_arch", target_arch)
             return
         by_pkg = {i["package"]: (k, i) for k, i in APPS.items()}
@@ -332,9 +341,11 @@ def main():
         set_output("morphe_tag", mor_tag); set_output("de_revanced_tag", drvr_tag)
         set_output("de_vanced_tag", dvcd_tag); set_output("piko_tag", piko_tag)
         set_output("hoodles_tag", hoodles_tag); set_output("cli_tag", cli_tag)
+        set_output("piko_newx_tag", piko_nx_tag)
         set_output("morphe_mpp", mor_mpp["name"]); set_output("de_revanced_mpp", drvr_mpp["name"])
         set_output("de_vanced_mpp", dvcd_mpp["name"]); set_output("piko_mpp", piko_mpp["name"])
         set_output("hoodles_mpp", hoodles_mpp["name"]); set_output("cli_jar", cli_jar["name"])
+        set_output("piko_newx_mpp", piko_nx_mpp["name"])
         set_output("target_arch", target_arch)
         return
 
@@ -359,6 +370,7 @@ def main():
             "de_vanced":   last.get("de_vanced_tag")   != dvcd_tag,
             "piko":        last.get("piko_tag")         != piko_tag,
             "hoodles":     last.get("hoodles_tag")      != hoodles_tag,
+            "piko_newx":   last.get("piko_newx_tag")    != piko_nx_tag,
         }[info["source"]]
 
         needs = bool(latest) and (force_all or last.get(key) != latest or patch_changed)
@@ -386,17 +398,19 @@ def main():
     set_output("de_vanced_tag",    dvcd_tag)
     set_output("piko_tag",         piko_tag)
     set_output("hoodles_tag",      hoodles_tag)
+    set_output("piko_newx_tag",  piko_nx_tag)
     set_output("cli_tag",          cli_tag)
     set_output("morphe_mpp",       mor_mpp["name"])
     set_output("de_revanced_mpp",  drvr_mpp["name"])
     set_output("de_vanced_mpp",    dvcd_mpp["name"])
     set_output("piko_mpp",         piko_mpp["name"])
     set_output("hoodles_mpp",      hoodles_mpp["name"])
+    set_output("piko_newx_mpp",  piko_nx_mpp["name"])
     set_output("cli_jar",          cli_jar["name"])
     set_output("target_arch",      target_arch)
 
     if not os.getenv("SKIP_CLEANUP"):
-        for asset in [cli_jar, mor_mpp, drvr_mpp, dvcd_mpp, piko_mpp, hoodles_mpp]:
+        for asset in [cli_jar, mor_mpp, drvr_mpp, dvcd_mpp, piko_mpp, piko_nx_mpp, hoodles_mpp]:
             if os.path.exists(asset["name"]):
                 try:
                     os.remove(asset["name"])

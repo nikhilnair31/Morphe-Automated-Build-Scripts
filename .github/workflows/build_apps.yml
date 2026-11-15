@@ -61,12 +61,14 @@ jobs:
       de_revanced_tag:  ${{ steps.check.outputs.de_revanced_tag }}
       de_vanced_tag:    ${{ steps.check.outputs.de_vanced_tag }}
       piko_tag:         ${{ steps.check.outputs.piko_tag }}
+      piko_newx_tag:    ${{ steps.check.outputs.piko_newx_tag }}
       hoodles_tag:      ${{ steps.check.outputs.hoodles_tag }}
       cli_tag:          ${{ steps.check.outputs.cli_tag }}
       morphe_mpp:       ${{ steps.check.outputs.morphe_mpp }}
       de_revanced_mpp:  ${{ steps.check.outputs.de_revanced_mpp }}
       de_vanced_mpp:    ${{ steps.check.outputs.de_vanced_mpp }}
       piko_mpp:         ${{ steps.check.outputs.piko_mpp }}
+      piko_newx_mpp:    ${{ steps.check.outputs.piko_newx_mpp }}
       hoodles_mpp:      ${{ steps.check.outputs.hoodles_mpp }}
       cli_jar:          ${{ steps.check.outputs.cli_jar }}
       target_arch:      ${{ steps.check.outputs.target_arch }}
@@ -163,6 +165,7 @@ jobs:
           DE_REVANCED_MPP:  ${{ needs.check-versions.outputs.de_revanced_mpp }}
           DE_VANCED_MPP:    ${{ needs.check-versions.outputs.de_vanced_mpp }}
           PIKO_MPP:         ${{ needs.check-versions.outputs.piko_mpp }}
+          PIKO_NEWX_MPP:    ${{ needs.check-versions.outputs.piko_newx_mpp }}
           HOODLES_MPP:      ${{ needs.check-versions.outputs.hoodles_mpp }}
           TARGET_ARCH:      ${{ needs.check-versions.outputs.target_arch }}
           USE_STAGED:       ${{ github.event.inputs.use_staged_bases || 'false' }}
@@ -177,6 +180,7 @@ jobs:
           DMPP=$(find . -maxdepth 1 -name "$DE_REVANCED_MPP" | head -1)
           DVMPP=$(find . -maxdepth 1 -name "$DE_VANCED_MPP"  | head -1)
           PMPP=$(find . -maxdepth 1 -name "$PIKO_MPP"       | head -1)
+          PNMPP=$(find . -maxdepth 1 -name "$PIKO_NEWX_MPP" | head -1)
           HMPP=$(find . -maxdepth 1 -name "$HOODLES_MPP"    | head -1)
 
           echo "$APPS_JSON" | python3 -c "
@@ -340,6 +344,7 @@ jobs:
               de_revanced)  PATCH_FILE="$DMPP"  ;;
               de_vanced)    PATCH_FILE="$DVMPP" ;;
               piko)         PATCH_FILE="$PMPP"  ;;
+              piko_newx)    PATCH_FILE="$PNMPP" ;;
               hoodles)      PATCH_FILE="$HMPP"  ;;
             esac
 
@@ -531,6 +536,7 @@ jobs:
           MORPHE_TAG:   ${{ needs.check-versions.outputs.morphe_tag }}
           DRVR_TAG:     ${{ needs.check-versions.outputs.de_revanced_tag }}
           PIKO_TAG:     ${{ needs.check-versions.outputs.piko_tag }}
+          PIKONX_TAG:   ${{ needs.check-versions.outputs.piko_newx_tag }}
           HOODLES_TAG:  ${{ needs.check-versions.outputs.hoodles_tag }}
           CLI_TAG:      ${{ needs.check-versions.outputs.cli_tag }}
           TODAY:        ${{ steps.date.outputs.today }}
@@ -544,6 +550,7 @@ jobs:
           morphe  = os.environ["MORPHE_TAG"]
           drvr    = os.environ["DRVR_TAG"]
           piko    = os.environ["PIKO_TAG"]
+          pikonx  = os.environ["PIKONX_TAG"]
           hoodles = os.environ["HOODLES_TAG"]
           cli     = os.environ["CLI_TAG"]
           today   = os.environ["TODAY"]
@@ -585,7 +592,7 @@ jobs:
 
           lines += [
             "",
-            f"**Morphe:** `{morphe}` · **De-ReVanced:** `{drvr}` · **Piko:** `{piko}` · **hoo-dles:** `{hoodles}` · **CLI:** `{cli}`",
+            f"**Morphe:** `{morphe}` · **De-ReVanced:** `{drvr}` · **Piko:** `{piko}` · **Piko-newX:** `{pikonx}` · **hoo-dles:** `{hoodles}` · **CLI:** `{cli}`",
             f"**Build date:** `{today}`",
             "",
             "---",
