@@ -18,56 +18,8 @@ on:
           - youtube
           - music
           - reddit
-          - tiktok
-          - tiktok_jp
-          - twitch
-          - facebook
-          - messenger
-          - threads
-          - disney_plus
-          - soundcloud
-          - strava
-          - tumblr
-          - amazon_shop
-          - amazon_music
-          - google_photos
-          - google_news
-          - google_rec
-          - proton_mail
-          - viber
-          - letterboxd
-          - pixiv
-          - cricbuzz
-          - bandcamp
-          - rar
-          - photomath
-          - peacock_tv
-          - nothing_x
-          - inshorts
-          - icon_studio
-          - hex_editor
-          - gmx_mail
-          - angulus
-          - irplus
-          - nu_nl
           - twitter
           - instagram
-          - adguard
-          - prime_video
-          - duolingo
-          - myfitnesspal
-          - nova_launcher
-          - solid_explorer
-          - xodo_pdf
-          - ibis_paint
-          - wps_office
-          - camscanner
-          - fotmob
-          - pandora
-          - podcast_addict
-          - proton_vpn
-          - windy
-          - sofascore
       version_override:
         description: "Force a specific version (e.g. 19.16.39) — leave empty for latest supported"
         required: false
@@ -386,6 +338,8 @@ jobs:
             if java -jar "$CLI" patch \
                 --continue-on-error \
                 --keystore=morphe.keystore \
+                --keystore-entry-alias Morphe \
+                --keystore-entry-password Morphe \
                 -p "$PATCH_FILE" \
                 "${EXTRA_FLAGS[@]}" \
                 "${STRIP_FLAGS[@]}" \
@@ -636,6 +590,53 @@ jobs:
           fail_on_unmatched_files: false
           draft: false
           prerelease: false
+
+      - name: Notify Telegram with download links
+        env:
+          APPS_JSON:  ${{ needs.check-versions.outputs.apps_to_build }}
+          TG_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT:    ${{ secrets.TELEGRAM_CHAT_ID }}
+          REPO:       ${{ github.repository }}
+          EVENT:      ${{ github.event_name }}
+          MANUAL_APP: ${{ github.event.inputs.app }}
+          TODAY:      ${{ steps.date.outputs.today }}
+        run: |
+          if [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT" ]; then
+            echo "Telegram secrets not set — skipping notify."
+            exit 0
+          fi
+          TAG="morphe-apps-v${TODAY}"
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            TAG="${TAG}-manual-${MANUAL_APP:-all}"
+          fi
+          echo "Release tag: $TAG"
+          python3 - "$TAG" <<'PYEOF' > tg_msg.html
+          import glob, json, os, sys, urllib.parse
+          tag = sys.argv[1]
+          repo = os.environ["REPO"]
+          apps = json.loads(os.environ["APPS_JSON"])
+          built = {a["key"].replace("_", "-") for a in apps}
+          rows = []
+          for f in sorted(glob.glob("dist/*.apk")):
+              name = os.path.basename(f)
+              key = name.split("-morphe-", 1)[0]
+              if key in built:
+                  url = f"https://github.com/{repo}/releases/download/{tag}/{urllib.parse.quote(name)}"
+                  rows.append((key, name, url))
+          lines = ["<b>Patched app updates</b>", ""]
+          for a in sorted(apps, key=lambda x: x["key"]):
+              lines.append(f"• {a['key']} → <code>{a['version']}</code>")
+          lines.append("")
+          for key, name, url in sorted(rows):
+              lines.append(f"⬇️ <a href=\"{url}\">{key}</a> <i>({name})</i>")
+          lines += ["", f"<a href=\"https://github.com/{repo}/releases/tag/{tag}\">Release page</a> — tap a link, download, install. Same signature as your phone, updates in place."]
+          print("\n".join(lines))
+          PYEOF
+          curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            -d chat_id="$TG_CHAT" \
+            --data-urlencode "text@tg_msg.html" \
+            -d parse_mode=HTML -d disable_web_page_preview=true
+          echo ""
 
       - name: Save updated state
         if: github.event_name == 'schedule' || github.event.inputs.app == 'all'
