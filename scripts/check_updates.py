@@ -287,6 +287,57 @@ def main():
     }
 
     apps_to_build = []
+    use_staged = os.environ.get("USE_STAGED", "").strip().lower() in ("1", "true", "yes")
+    if use_staged:
+        # Bases were staged by Nitro into the "bases" release; build exactly
+        # what is staged instead of re-resolving versions here.
+        headers = {"Accept": "application/vnd.github.v3+json"}
+        if os.environ.get("GITHUB_TOKEN"):
+            headers["Authorization"] = f"token {os.environ['GITHUB_TOKEN']}"
+        r = requests.get(
+            f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/releases/tags/bases",
+            headers=headers, timeout=30,
+        )
+        if r.status_code != 200:
+            print("  No staging release — nothing to build.")
+            set_output("any_needs_build", "false")
+            set_output("apps_to_build", "[]")
+            set_output("morphe_tag", mor_tag); set_output("de_revanced_tag", drvr_tag)
+            set_output("de_vanced_tag", dvcd_tag); set_output("piko_tag", piko_tag)
+            set_output("hoodles_tag", hoodles_tag); set_output("cli_tag", cli_tag)
+            set_output("morphe_mpp", mor_mpp["name"]); set_output("de_revanced_mpp", drvr_mpp["name"])
+            set_output("de_vanced_mpp", dvcd_mpp["name"]); set_output("piko_mpp", piko_mpp["name"])
+            set_output("hoodles_mpp", hoodles_mpp["name"]); set_output("cli_jar", cli_jar["name"])
+            set_output("target_arch", target_arch)
+            return
+        by_pkg = {i["package"]: (k, i) for k, i in APPS.items()}
+        for asset in r.json().get("assets", []):
+            m = re.match(r"(.+?)-v?([0-9][\w.\-]*)\.(apk|xapk|apkm)$", asset["name"])
+            if not m:
+                continue
+            pkg, version = m.group(1), m.group(2)
+            hit = by_pkg.get(pkg)
+            if not hit:
+                print(f"  NOTE: staged asset {asset['name']} has no matching app — skipping")
+                continue
+            key, info = hit
+            apps_to_build.append({
+                "key": key, "name": key.replace("_", "-"), "package": pkg,
+                "slug": info["slug"], "version": version, "source": info["source"],
+            })
+            current[key] = version
+            print(f"  OK {key} -> {version} (staged)")
+        set_output("any_needs_build", "true" if apps_to_build else "false")
+        set_output("apps_to_build", json.dumps(apps_to_build))
+        set_output("morphe_tag", mor_tag); set_output("de_revanced_tag", drvr_tag)
+        set_output("de_vanced_tag", dvcd_tag); set_output("piko_tag", piko_tag)
+        set_output("hoodles_tag", hoodles_tag); set_output("cli_tag", cli_tag)
+        set_output("morphe_mpp", mor_mpp["name"]); set_output("de_revanced_mpp", drvr_mpp["name"])
+        set_output("de_vanced_mpp", dvcd_mpp["name"]); set_output("piko_mpp", piko_mpp["name"])
+        set_output("hoodles_mpp", hoodles_mpp["name"]); set_output("cli_jar", cli_jar["name"])
+        set_output("target_arch", target_arch)
+        return
+
     for key, info in APPS.items():
         mpp_file = source_to_mpp.get(info["source"])
         versions = get_compatible_versions(cli_jar["name"], [mpp_file], info["package"])

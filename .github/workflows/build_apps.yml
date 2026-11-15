@@ -38,6 +38,11 @@ on:
         required: false
         default: false
         type: boolean
+      use_staged_bases:
+        description: "Build from Nitro-staged bases (release tag 'bases') instead of mirror downloads"
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   # ─────────────────────────────────────────────────────────────
@@ -85,6 +90,7 @@ jobs:
           MANUAL_VERSION:   ${{ github.event.inputs.version_override || '' }}
           TARGET_ARCH:      ${{ github.event.inputs.arch || 'arm64-v8a' }}
           FORCE_ALL:        ${{ github.event.inputs.force_all || 'false' }}
+          USE_STAGED:       ${{ github.event.inputs.use_staged_bases || 'false' }}
         run: python scripts/check_updates.py
 
       - name: Apps queued for build
@@ -139,6 +145,7 @@ jobs:
           MANUAL_VERSION: ${{ github.event.inputs.version_override || '' }}
           TARGET_ARCH:  ${{ github.event.inputs.arch || 'arm64-v8a' }}
           FORCE_ALL:    ${{ github.event.inputs.force_all || 'false' }}
+          USE_STAGED:   ${{ github.event.inputs.use_staged_bases || 'false' }}
         run: python scripts/check_updates.py
 
       - name: Decode keystore
@@ -158,6 +165,7 @@ jobs:
           PIKO_MPP:         ${{ needs.check-versions.outputs.piko_mpp }}
           HOODLES_MPP:      ${{ needs.check-versions.outputs.hoodles_mpp }}
           TARGET_ARCH:      ${{ needs.check-versions.outputs.target_arch }}
+          USE_STAGED:       ${{ github.event.inputs.use_staged_bases || 'false' }}
           TODAY:            ${{ steps.date.outputs.today }}
         run: |
           mkdir -p dist
@@ -183,7 +191,26 @@ jobs:
             APK_FILE=""
             APK_SOURCE=""
 
+            # Staged bases from Nitro (release tag "bases"), when requested.
+            # Skips the whole mirror cascade — Nitro's camoufox fetch already
+            # handles the Cloudflare-walled sources runners cannot touch.
+            if [ "$USE_STAGED" = "true" ]; then
+              echo "  Downloading staged base for ${PKG}..."
+              gh release download bases -R "$GITHUB_REPOSITORY" -p "${PKG}-*" -D . 2>&1 || true
+              STAGED_FILE=$(find . -maxdepth 1 \( -name "${PKG}-*.apk" -o -name "${PKG}-*.xapk" -o -name "${PKG}-*.apkm" \) | head -1)
+              if [ -n "$STAGED_FILE" ] && [ -s "$STAGED_FILE" ]; then
+                APK_FILE="$STAGED_FILE"
+                APK_SOURCE="staged"
+                echo "  Staged base: $APK_FILE ($(du -h "$APK_FILE" | cut -f1))"
+              else
+                echo "::warning::No staged base for $KEY (${PKG}) in release 'bases' — skipping"
+                printf "| %s | \\`%s\\` | staged | ⚠️ no staged base |\n" "$KEY" "$VER" >> "$SUMMARY_FILE"
+                continue
+              fi
+            fi
+
             # Source 1: APKMirror (publisher-verified, no user submissions)
+            if [ "$USE_STAGED" != "true" ]; then
             echo "  Trying APKMirror for ${PKG}@${VER}..."
             APKMIRROR_OUT="${PKG}.apk"
             if python scripts/apkmirror_dl.py \
@@ -196,6 +223,7 @@ jobs:
                 APK_SOURCE="APKMirror"
                 echo "  Downloaded from APKMirror: $APK_FILE ($(du -h "$APK_FILE" | cut -f1))"
               fi
+            fi
             fi
 
             # Source 2: Uptodown fallback
@@ -637,6 +665,26 @@ jobs:
             --data-urlencode "text@tg_msg.html" \
             -d parse_mode=HTML -d disable_web_page_preview=true
           echo ""
+
+      - name: Delete consumed staging assets
+        if: always()
+        env:
+          GH_TOKEN:  ${{ secrets.GITHUB_TOKEN }}
+          APPS_JSON: ${{ needs.check-versions.outputs.apps_to_build }}
+        run: |
+          # Only consume (delete) staging assets for apps that actually
+          # produced a fresh build this run — failed apps keep their base
+          # so the next scheduled run retries without Nitro re-uploading.
+          KEYS=$(tail -n +3 build_summary.md 2>/dev/null | grep '✅ built' | awk -F'|' '{gsub(/ /,"",$2); print $2}')
+          if [ -z "$KEYS" ]; then echo "Nothing built — staging assets kept."; exit 0; fi
+          for KEY in $KEYS; do
+            PKG=$(echo "$APPS_JSON" | jq -r --arg k "$KEY" '.[] | select(.key==$k) | .package')
+            [ -z "$PKG" ] || [ "$PKG" = "null" ] && continue
+            gh api "repos/$GITHUB_REPOSITORY/releases/tags/bases" --jq ".assets[] | select(.name | startswith(\"${PKG}-\")) | .id" 2>/dev/null \
+              | while read -r AID; do
+                  gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$AID" >/dev/null && echo "  consumed staged base for $KEY ($PKG)"
+                done
+          done
 
       - name: Save updated state
         if: github.event_name == 'schedule' || github.event.inputs.app == 'all'
