@@ -1,0 +1,20 @@
+name: probe-x2
+on:
+  workflow_dispatch:
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Uptodown X 12.41.0-prod.01 end-to-end
+        run: |
+          sudo -S -p '' apt-get install -y -q aapt 2>&1 | tail -1
+          curl -s -L -A "Mozilla/5.0 Chrome/131" -o /tmp/pd.html --max-time 60 "https://twitter.en.uptodown.com/android/post-download/1237685110"
+          echo "post-download page: $(wc -c < /tmp/pd.html) bytes"
+          grep -oE 'https://[a-z0-9.]*utdstc[^"]+' /tmp/pd.html | head -3
+          URL=$(grep -oE 'https://[a-z0-9.]*utdstc[^"]+\.apk[^"]*' /tmp/pd.html | head -1)
+          echo "final URL: ${URL:0:120}"
+          curl -s -L -A "Mozilla/5.0 Chrome/131" -o /tmp/x.apk --max-time 300 "$URL"
+          echo "downloaded: $(wc -c < /tmp/x.apk) bytes"
+          echo "lib dirs:"; unzip -l /tmp/x.apk 2>/dev/null | grep -oE "lib/[a-zA-Z0-9_-]+/" | sort -u
+          aapt dump badging /tmp/x.apk 2>/dev/null | head -1
