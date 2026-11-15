@@ -1,0 +1,643 @@
+name: probe9
+
+on:
+  push:
+    branches:
+      - master
+  schedule:
+    - cron: "0 6 */2 * *"   # Every 2 days at 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      app:
+        description: "App to build (or 'all' for auto-detection)"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - youtube
+          - music
+          - reddit
+          - tiktok
+          - tiktok_jp
+          - twitch
+          - facebook
+          - messenger
+          - threads
+          - disney_plus
+          - soundcloud
+          - strava
+          - tumblr
+          - amazon_shop
+          - amazon_music
+          - google_photos
+          - google_news
+          - google_rec
+          - proton_mail
+          - viber
+          - letterboxd
+          - pixiv
+          - cricbuzz
+          - bandcamp
+          - rar
+          - photomath
+          - peacock_tv
+          - nothing_x
+          - inshorts
+          - icon_studio
+          - hex_editor
+          - gmx_mail
+          - angulus
+          - irplus
+          - nu_nl
+          - twitter
+          - instagram
+          - adguard
+          - prime_video
+          - duolingo
+          - myfitnesspal
+          - nova_launcher
+          - solid_explorer
+          - xodo_pdf
+          - ibis_paint
+          - wps_office
+          - camscanner
+          - fotmob
+          - pandora
+          - podcast_addict
+          - proton_vpn
+          - windy
+          - sofascore
+      version_override:
+        description: "Force a specific version (e.g. 19.16.39) — leave empty for latest supported"
+        required: false
+        default: ""
+      arch:
+        description: "Target architecture"
+        required: true
+        default: "arm64-v8a"
+        type: choice
+        options:
+          - arm64-v8a
+          - armeabi-v7a
+          - universal
+      force_all:
+        description: "Rebuild every app in one job regardless of version diff (only with app=all — ignore concurrent per-app dispatches, they race on the shared release)"
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # JOB 1: Detect which apps need a build
+  # ─────────────────────────────────────────────────────────────
+  check-versions:
+    name: "Check for new supported versions"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    outputs:
+      any_needs_build:  ${{ steps.check.outputs.any_needs_build }}
+      apps_to_build:    ${{ steps.check.outputs.apps_to_build }}
+      morphe_tag:       ${{ steps.check.outputs.morphe_tag }}
+      de_revanced_tag:  ${{ steps.check.outputs.de_revanced_tag }}
+      de_vanced_tag:    ${{ steps.check.outputs.de_vanced_tag }}
+      piko_tag:         ${{ steps.check.outputs.piko_tag }}
+      hoodles_tag:      ${{ steps.check.outputs.hoodles_tag }}
+      cli_tag:          ${{ steps.check.outputs.cli_tag }}
+      morphe_mpp:       ${{ steps.check.outputs.morphe_mpp }}
+      de_revanced_mpp:  ${{ steps.check.outputs.de_revanced_mpp }}
+      de_vanced_mpp:    ${{ steps.check.outputs.de_vanced_mpp }}
+      piko_mpp:         ${{ steps.check.outputs.piko_mpp }}
+      hoodles_mpp:      ${{ steps.check.outputs.hoodles_mpp }}
+      cli_jar:          ${{ steps.check.outputs.cli_jar }}
+      target_arch:      ${{ steps.check.outputs.target_arch }}
+
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: { python-version: "3.x" }
+      - uses: actions/setup-java@v5
+        with: { distribution: "zulu", java-version: "21" }
+
+      - name: Install dependencies
+        run: pip install -q requests beautifulsoup4
+
+      - name: Run version check
+        id: check
+        env:
+          GITHUB_TOKEN:     ${{ secrets.GITHUB_TOKEN }}
+          SKIP_CLEANUP:     "true"
+          MANUAL_APP:       ${{ github.event.inputs.app || 'all' }}
+          MANUAL_VERSION:   ${{ github.event.inputs.version_override || '' }}
+          TARGET_ARCH:      ${{ github.event.inputs.arch || 'arm64-v8a' }}
+          FORCE_ALL:        ${{ github.event.inputs.force_all || 'false' }}
+        run: python scripts/check_updates.py
+
+      - name: Apps queued for build
+        run: |
+          echo '${{ steps.check.outputs.apps_to_build }}' \
+            | python3 -c "
+          import json, sys
+          apps = json.load(sys.stdin)
+          if apps:
+              for a in apps:
+                  print(f\"  {a['key']:20} {a['version']}\")
+          else:
+              print('  Nothing changed.')
+          "
+
+  # ─────────────────────────────────────────────────────────────
+  # JOB 2: Build changed apps and publish release
+  # ─────────────────────────────────────────────────────────────
+  build-and-release:
+    name: "Build & Release"
+    needs: check-versions
+    if: needs.check-versions.outputs.any_needs_build == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+        with: { python-version: "3.x" }
+        with: { distribution: "zulu", java-version: "21" }
+
+      - name: Install dependencies
+        run: |
+          pip install -q requests beautifulsoup4 'curl_cffi>=0.7'
+          sudo apt-get update -q
+          sudo apt-get install -y -q aapt apksigner
+
+      - name: Install apkeep (APKPure fallback downloader)
+        run: |
+          wget -qO apkeep \
+            https://github.com/EFForg/apkeep/releases/latest/download/apkeep-x86_64-unknown-linux-gnu
+          chmod +x apkeep
+          sudo mv apkeep /usr/local/bin/
+
+      - name: Download CLI & all patch bundles
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SKIP_CLEANUP: "true"
+          MANUAL_APP:   ${{ github.event.inputs.app || 'all' }}
+          MANUAL_VERSION: ${{ github.event.inputs.version_override || '' }}
+          TARGET_ARCH:  ${{ github.event.inputs.arch || 'arm64-v8a' }}
+          FORCE_ALL:    ${{ github.event.inputs.force_all || 'false' }}
+        run: python scripts/check_updates.py
+
+      - name: Decode keystore
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > morphe.keystore
+
+      - name: Set build date
+        id: date
+        run: echo "today=$(date +'%Y.%m.%d')" >> $GITHUB_OUTPUT
+
+      - name: Build all queued apps
+        env:
+          APPS_JSON:        ${{ needs.check-versions.outputs.apps_to_build }}
+          CLI_JAR:          ${{ needs.check-versions.outputs.cli_jar }}
+          MORPHE_MPP:       ${{ needs.check-versions.outputs.morphe_mpp }}
+          DE_REVANCED_MPP:  ${{ needs.check-versions.outputs.de_revanced_mpp }}
+          DE_VANCED_MPP:    ${{ needs.check-versions.outputs.de_vanced_mpp }}
+          PIKO_MPP:         ${{ needs.check-versions.outputs.piko_mpp }}
+          HOODLES_MPP:      ${{ needs.check-versions.outputs.hoodles_mpp }}
+          TARGET_ARCH:      ${{ needs.check-versions.outputs.target_arch }}
+          TODAY:            ${{ steps.date.outputs.today }}
+        run: |
+          mkdir -p dist
+          SUMMARY_FILE="build_summary.md"
+          printf "| App | Version | Source | Status |\n|-----|---------|--------|--------|\n" > "$SUMMARY_FILE"
+
+          CLI=$(find . -maxdepth 1 -name "$CLI_JAR"        | head -1)
+          MMPP=$(find . -maxdepth 1 -name "$MORPHE_MPP"     | head -1)
+          DMPP=$(find . -maxdepth 1 -name "$DE_REVANCED_MPP" | head -1)
+          DVMPP=$(find . -maxdepth 1 -name "$DE_VANCED_MPP"  | head -1)
+          PMPP=$(find . -maxdepth 1 -name "$PIKO_MPP"       | head -1)
+          HMPP=$(find . -maxdepth 1 -name "$HOODLES_MPP"    | head -1)
+
+          echo "$APPS_JSON" | python3 -c "
+          import json, sys
+          for a in json.load(sys.stdin):
+              print(a['key'], a['package'], a['version'], a['source'])
+          " | while read KEY PKG VER SRC; do
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "  ▶ $KEY  v$VER  [arch: ${TARGET_ARCH}]"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            APK_FILE=""
+            APK_SOURCE=""
+
+            # Source 1: APKMirror (publisher-verified, no user submissions)
+            echo "  Trying APKMirror for ${PKG}@${VER}..."
+            APKMIRROR_OUT="${PKG}.apk"
+            if python scripts/apkmirror_dl.py \
+                --package "$PKG" \
+                --version "$VER" \
+                --arch "${TARGET_ARCH}" \
+                --output "$APKMIRROR_OUT" 2>&1; then
+              if [ -s "$APKMIRROR_OUT" ]; then
+                APK_FILE="$APKMIRROR_OUT"
+                APK_SOURCE="APKMirror"
+                echo "  Downloaded from APKMirror: $APK_FILE ($(du -h "$APK_FILE" | cut -f1))"
+              fi
+            fi
+
+            # Source 2: Uptodown fallback
+            if [ -z "$APK_FILE" ] || [ ! -s "$APK_FILE" ]; then
+              echo "  Trying Uptodown scraper..."
+              UPTODOWN_OUT="${PKG}.apk"
+              if python scripts/uptodown_dl.py \
+                  --name "$KEY" \
+                  --package "$PKG" \
+                  --version "$VER" \
+                  --output "$UPTODOWN_OUT" 2>&1; then
+                if [ -s "$UPTODOWN_OUT" ]; then
+                  APK_FILE="$UPTODOWN_OUT"
+                  APK_SOURCE="Uptodown"
+                  echo "  Downloaded from Uptodown: $APK_FILE ($(du -h "$APK_FILE" | cut -f1))"
+                fi
+              fi
+            fi
+
+            # Source 3: APKPure last resort (signature check below will abort if tampered)
+            if [ -z "$APK_FILE" ] || [ ! -s "$APK_FILE" ]; then
+              echo "  Trying APKPure (last resort, signature-verified below)..."
+              rm -f "${PKG}"*.apk "${PKG}"*.xapk 2>/dev/null || true
+              if [ "$VER" = "apkpure-latest" ] || [[ "$VER" =~ ^[0-9]+\.[0-9]{9,}$ ]]; then
+                echo "  (no version pin - downloading latest from APKPure)"
+                apkeep -a "${PKG}" -d apk-pure . 2>&1 || true
+              else
+                apkeep -a "${PKG}@${VER}" -d apk-pure . 2>&1 || true
+              fi
+              CANDIDATE=$(find . -maxdepth 1 \( -name "${PKG}*.apk" -o -name "${PKG}*.xapk" \) | head -1)
+              if [ -n "$CANDIDATE" ] && [ -s "$CANDIDATE" ]; then
+                APK_FILE="$CANDIDATE"
+                APK_SOURCE="APKPure"
+                echo "  Downloaded from APKPure: $APK_FILE ($(du -h "$APK_FILE" | cut -f1))"
+              fi
+            fi
+
+            # Source 4: APKPure version-free (for apps where exact version is not indexed)
+            if [ -z "$APK_FILE" ] || [ ! -s "$APK_FILE" ]; then
+              if [ "$VER" != "apkpure-latest" ]; then
+                echo "  Trying APKPure without version pin..."
+                rm -f "${PKG}"*.apk "${PKG}"*.xapk 2>/dev/null || true
+                apkeep -a "${PKG}" -d apk-pure . 2>&1 || true
+                CANDIDATE=$(find . -maxdepth 1 \( -name "${PKG}*.apk" -o -name "${PKG}*.xapk" \) | head -1)
+                if [ -n "$CANDIDATE" ] && [ -s "$CANDIDATE" ]; then
+                  APK_FILE="$CANDIDATE"
+                  APK_SOURCE="APKPure-latest"
+                  echo "  APKPure latest: $APK_FILE ($(du -h "$APK_FILE" | cut -f1))"
+                fi
+              fi
+            fi
+
+            if [ -z "$APK_FILE" ] || [ ! -s "$APK_FILE" ]; then
+              echo "::warning::No source found for $KEY v${VER} — skipping (no APKMirror/Uptodown/APKPure result)"
+              printf "| %s | \`%s\` | none | ⚠️ no source |\n" "$KEY" "$VER" >> "$SUMMARY_FILE"
+              continue
+            fi
+
+            echo "  Verifying APK signature..."
+            VERIFY_FILE="$APK_FILE"
+            XAPK_EXTRACTED=""
+            XAPK_EXTRACTED=""
+            if [[ "$APK_FILE" == *.xapk ]] || (unzip -Z1 "$APK_FILE" 2>/dev/null | grep -qE "(^|/)base\.apk$"); then
+              echo "  Detected split APK/XAPK bundle. Extracting base APK..."
+              echo "  Archive entries: $(unzip -Z1 "$APK_FILE" 2>/dev/null | grep -i "\.apk" | tr '\n' ' ')"
+              # Match base.apk at root or in any subdirectory (e.g. apks/base.apk)
+              BASE_APK_NAME=$(unzip -Z1 "$APK_FILE" 2>/dev/null | grep -E "(^|/)base\.apk$" | head -1)
+              if [ -z "$BASE_APK_NAME" ]; then
+                # Fallback: first non-config/non-split APK in archive
+                BASE_APK_NAME=$(unzip -Z1 "$APK_FILE" 2>/dev/null | grep -E "\.apk$" | grep -vE "(config|split_config)\." | head -1)
+              fi
+              if [ -n "$BASE_APK_NAME" ]; then
+                unzip -p "$APK_FILE" "$BASE_APK_NAME" > "${PKG}_base_verify.apk" 2>/dev/null
+                VERIFY_FILE="${PKG}_base_verify.apk"
+                XAPK_EXTRACTED="$VERIFY_FILE"
+                echo "  Extracted '$BASE_APK_NAME' ($(du -h "$VERIFY_FILE" | cut -f1))"
+              else
+                echo "  WARNING: no base APK found inside ZIP — verifying outer file directly"
+              fi
+            fi
+            echo "  Verifying original signature..."
+            if ! apksigner verify "$VERIFY_FILE"; then
+              echo "  ERROR: apksigner verification failed for $KEY"
+            fi
+            if apksigner verify "$VERIFY_FILE" &>/dev/null; then
+              echo "  Original signature OK"
+              rm -f "$XAPK_EXTRACTED"
+              CERT_FP=$(apksigner verify --print-certs "$VERIFY_FILE" 2>/dev/null | grep "Signer #1 certificate SHA-256 digest" | awk '{print $NF}')
+              # set -e is active for this step; a bare non-zero exit from cert_pin.py
+              # (42 mismatch / 43 new-app-APKPure-only) would abort the whole build
+              # before CERT_EXIT is read, killing every app after this one. The `|| CERT_EXIT=$?`
+              # keeps the exit code capturable so the branches below skip just this app.
+              CERT_EXIT=0
+              CERT_PKG="$PKG" CERT_KEY="$KEY" CERT_FP="$CERT_FP" CERT_SOURCE="$APK_SOURCE" python3 scripts/cert_pin.py || CERT_EXIT=$?
+              if [ "$CERT_EXIT" = "42" ]; then
+                rm -f "$APK_FILE"
+                printf "| %s | \`%s\` | %s | ❌ cert mismatch |\n" "$KEY" "$VER" "$APK_SOURCE" >> "$SUMMARY_FILE"
+                continue
+              elif [ "$CERT_EXIT" = "43" ]; then
+                rm -f "$APK_FILE"
+                printf "| %s | \`%s\` | %s | ❌ new app, needs APKMirror/Uptodown first |\n" "$KEY" "$VER" "$APK_SOURCE" >> "$SUMMARY_FILE"
+                continue
+              fi
+            else
+              echo "  ERROR: APK signature invalid for $KEY — possible tampered APK from mirror. Skipping."
+              rm -f "$APK_FILE" "$XAPK_EXTRACTED"
+              printf "| %s | \`%s\` | %s | ❌ invalid signature (bad download or tampered mirror) |\n" "$KEY" "$VER" "$APK_SOURCE" >> "$SUMMARY_FILE"
+              continue
+            fi
+
+            PATCH_FILE=""
+            case "$SRC" in
+              morphe)       PATCH_FILE="$MMPP"  ;;
+              de_revanced)  PATCH_FILE="$DMPP"  ;;
+              de_vanced)    PATCH_FILE="$DVMPP" ;;
+              piko)         PATCH_FILE="$PMPP"  ;;
+              hoodles)      PATCH_FILE="$HMPP"  ;;
+            esac
+
+            EXTRA_FLAGS=()
+            if [ "$KEY" = "google_photos" ]; then
+              echo "  Forcing inclusion of all Google Photos patches"
+              EXTRA_FLAGS+=(--enable "GmsCore support")
+              EXTRA_FLAGS+=(--enable "Spoof features")
+              EXTRA_FLAGS+=(--enable "Enable DCIM folders backup control")
+            fi
+
+            # Strip native libs for architectures the target device can't use
+            # (keeps only $TARGET_ARCH, e.g. arm64-v8a — drops armeabi-v7a/x86/x86_64).
+            # Matches the Morphe manager's "strip libs" option: big size cut, safe on
+            # 64-bit-only devices. Skipped when a universal build is explicitly requested.
+            STRIP_FLAGS=()
+            if [ "$TARGET_ARCH" != "universal" ]; then
+              STRIP_FLAGS+=(--striplibs="$TARGET_ARCH")
+            fi
+
+            TMP_OUT="dist/.tmp_${KEY}.apk"
+            rm -f "$TMP_OUT"
+            echo "  Patching -> $TMP_OUT (using patches from source: $SRC)"
+            if java -jar "$CLI" patch \
+                --continue-on-error \
+                --keystore=morphe.keystore \
+                -p "$PATCH_FILE" \
+                "${EXTRA_FLAGS[@]}" \
+                "${STRIP_FLAGS[@]}" \
+                -o "$TMP_OUT" \
+                "$APK_FILE"; then
+
+              # Ground-truth ABI check on the actual patched output. Source-site
+              # "universal" labels (APKPure/Uptodown) often just mean "arch not
+              # declared", not "contains every arch" — trusting that label shipped
+              # an armeabi-v7a-only cricbuzz build as "universal" that then failed
+              # INSTALL_FAILED_NO_MATCHING_ABIS on real 64-bit-only devices.
+              # Check the zip directly; don't rely on aapt (may not even be
+              # installed on the runner) or on what the mirror site claims.
+              # Only real Android ABI directory names — lib/ can contain other
+              # subfolders too (camscanner ships lib/katex_fonts/, which is
+              # not an architecture and was false-positiving as one).
+              BUNDLED_ABIS=$(unzip -l "$TMP_OUT" 2>/dev/null \
+                | grep -oE "lib/[a-zA-Z0-9_-]+/" \
+                | sed -E 's#lib/##; s#/##' \
+                | grep -E '^(arm64-v8a|armeabi-v7a|armeabi|x86_64|x86|mips64|mips)$' \
+                | sort -u)
+
+              if [ -z "$BUNDLED_ABIS" ]; then
+                FINAL_ARCH="universal"
+                ARCH_OK=1
+              elif [ "$TARGET_ARCH" = "universal" ]; then
+                # explicit "any arch is fine" request — label with what's actually there
+                FINAL_ARCH=$(echo "$BUNDLED_ABIS" | tr '\n' '+' | sed 's/+$//')
+                ARCH_OK=1
+              elif echo "$BUNDLED_ABIS" | grep -qx "$TARGET_ARCH"; then
+                FINAL_ARCH="$TARGET_ARCH"
+                ARCH_OK=1
+              else
+                FINAL_ARCH=""
+                ARCH_OK=0
+              fi
+
+              if [ "$ARCH_OK" = "1" ]; then
+                OUT="dist/${KEY}-morphe-v${VER}-${FINAL_ARCH}-${TODAY}.apk"
+                mv "$TMP_OUT" "$OUT"
+
+                # A build "succeeding" only means the CLI exited 0 — it says
+                # nothing about whether the result actually installs. Verify
+                # the CLI's own re-signing produced a valid, installable
+                # signature, and that the manifest still parses. Either
+                # failing here reproduces "package appears to be invalid" on
+                # a real device with zero visibility from the build log alone.
+                POST_OK=1
+                if ! apksigner verify "$OUT" &>/dev/null; then
+                  echo "::warning::$KEY v${VER} — final signed APK failed apksigner verify"
+                  POST_OK=0
+                elif ! aapt dump badging "$OUT" &>/dev/null; then
+                  echo "::warning::$KEY v${VER} — final APK manifest failed to parse (aapt dump badging)"
+                  POST_OK=0
+                fi
+
+                if [ "$POST_OK" = "1" ]; then
+                  echo "  Built: $OUT (bundled native libs: ${BUNDLED_ABIS:-none / pure-Java})"
+                  printf "| %s | \`%s\` | %s | ✅ built |\n" "$KEY" "$VER" "$APK_SOURCE" >> "$SUMMARY_FILE"
+                else
+                  printf "| %s | \`%s\` | %s | ❌ post-build verify failed |\n" "$KEY" "$VER" "$APK_SOURCE" >> "$SUMMARY_FILE"
+                  rm -f "$OUT"
+                fi
+              else
+                BAD_ABIS=$(echo "$BUNDLED_ABIS" | tr '\n' ',' | sed 's/,$//')
+                echo "::warning::$KEY v${VER} wanted ${TARGET_ARCH} but source APK only bundled [${BAD_ABIS}] — refusing to publish a wrong-ABI build"
+                printf "| %s | \`%s\` | %s | ❌ ABI mismatch (wanted %s, got %s) |\n" "$KEY" "$VER" "$APK_SOURCE" "$TARGET_ARCH" "$BAD_ABIS" >> "$SUMMARY_FILE"
+                rm -f "$TMP_OUT"
+              fi
+            else
+              echo "::warning::Patch failed for $KEY v${VER}"
+              printf "| %s | \`%s\` | %s | ❌ patch failed |\n" "$KEY" "$VER" "$APK_SOURCE" >> "$SUMMARY_FILE"
+              rm -f "$TMP_OUT"
+            fi
+
+            rm -f "$APK_FILE"
+          done
+
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Built APKs:"
+          ls -lh dist/*.apk 2>/dev/null || echo "  None built."
+
+      - name: Fail loudly if zero APKs produced
+        env:
+          APPS_JSON: ${{ needs.check-versions.outputs.apps_to_build }}
+        run: |
+          BUILT=$(ls dist/*.apk 2>/dev/null | wc -l)
+          EXPECTED=$(echo "$APPS_JSON" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))")
+          SUMMARY_ROWS=$(tail -n +3 build_summary.md 2>/dev/null | grep -c '^|' || true)
+          echo "Expected: $EXPECTED apps  |  Built: $BUILT APKs  |  Logged outcomes: $SUMMARY_ROWS"
+          # 0 built is not itself alarming — an ABI mismatch, a cert-pin
+          # refusal, "no source found" are all correct, expected outcomes
+          # that get properly logged per app. Every one of those manual
+          # single-app test dispatches was reporting as a hard job failure
+          # (red X, failure email) even when it worked exactly as designed.
+          # Only alarm when apps are queued but *didn't even get a logged
+          # outcome* — that's the actual signature of something crashing
+          # before per-app handling ever ran (e.g. the CLI itself failing
+          # to launch), not "nothing needed publishing today."
+          if [ "$EXPECTED" != "0" ] && [ "$SUMMARY_ROWS" -lt "$EXPECTED" ]; then
+            echo "::error::Build silently failed — $EXPECTED apps queued, only $SUMMARY_ROWS got a logged outcome (built or otherwise). Something crashed before per-app handling."
+            exit 1
+          fi
+
+      - name: Write step summary
+        if: always()
+        run: |
+          echo "## Build results" >> $GITHUB_STEP_SUMMARY
+          cat build_summary.md >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
+
+      - name: Carry over unchanged APKs from previous release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PREV_TAG=$(gh release list --json tagName,isDraft \
+            -q '.[] | select(.isDraft == false) | .tagName' \
+            | grep "^morphe-apps-v[0-9]" | head -1)
+
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous release found — nothing to carry over."
+            exit 0
+          fi
+          echo "Carrying over from: $PREV_TAG"
+
+          # Decide from reality, not intent: whether an app was *attempted*
+          # this run says nothing about whether it *produced a file*. Using
+          # "was it queued" to skip carry-over silently dropped every failed
+          # app's still-good previous release asset the moment force_all
+          # queued the whole catalog at once (26 real successes replaced a
+          # release that used to have ~40 assets — the other ~14 apps went
+          # from "stale but present" to "gone"). Check dist/ directly.
+          gh release view "$PREV_TAG" --json assets -q '.assets[].name' | while read fname; do
+            [[ "$fname" == "SHA256SUMS.txt" ]] && continue
+            [[ "$fname" == *.apk ]] || continue
+            PREFIX=$(echo "$fname" | sed -E 's/-morphe-.*//')
+            if compgen -G "dist/${PREFIX}-morphe-*.apk" > /dev/null; then
+              echo "  ✅ $fname (fresh build already in dist)"
+            else
+              echo "  ↩  Carrying over: $fname"
+              gh release download "$PREV_TAG" -p "$fname" -D dist/ 2>/dev/null \
+                || echo "  ⚠️  Failed to carry over $fname"
+            fi
+          done
+
+          echo ""
+          echo "dist/ after carry-over ($(ls dist/*.apk 2>/dev/null | wc -l) APKs total):"
+          ls dist/*.apk 2>/dev/null | sed 's|dist/||'
+
+      - name: Upload artifact (90-day backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: "morphe-apps-${{ steps.date.outputs.today }}"
+          path: dist/*.apk
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Build release notes
+        env:
+          APPS_JSON:    ${{ needs.check-versions.outputs.apps_to_build }}
+          MORPHE_TAG:   ${{ needs.check-versions.outputs.morphe_tag }}
+          DRVR_TAG:     ${{ needs.check-versions.outputs.de_revanced_tag }}
+          PIKO_TAG:     ${{ needs.check-versions.outputs.piko_tag }}
+          HOODLES_TAG:  ${{ needs.check-versions.outputs.hoodles_tag }}
+          CLI_TAG:      ${{ needs.check-versions.outputs.cli_tag }}
+          TODAY:        ${{ steps.date.outputs.today }}
+          TRIGGER:      ${{ github.event_name }}
+          MANUAL_APP:   ${{ github.event.inputs.app || 'all' }}
+        run: |
+          python3 - <<'PYEOF'
+          import os, json, glob
+
+          apps    = json.loads(os.environ["APPS_JSON"])
+          morphe  = os.environ["MORPHE_TAG"]
+          drvr    = os.environ["DRVR_TAG"]
+          piko    = os.environ["PIKO_TAG"]
+          hoodles = os.environ["HOODLES_TAG"]
+          cli     = os.environ["CLI_TAG"]
+          today   = os.environ["TODAY"]
+          trigger = os.environ["TRIGGER"]
+          manual  = os.environ.get("MANUAL_APP", "all")
+
+          import re
+          trigger_line = "Scheduled auto-build" if trigger == "schedule" else f"Manual build ({manual})"
+          built_keys = {a["key"].replace("_", "-") for a in apps}
+          pat = re.compile(
+            r"^(.+?)-morphe-v(.+?)-"
+            r"((?:(?:arm64-v8a|armeabi-v7a|x86_64|x86)"
+            r"(?:\+(?:arm64-v8a|armeabi-v7a|x86_64|x86))*)|universal)"
+            r"-\d{4}\.\d{2}\.\d{2}\.apk$"
+          )
+
+          rows = []
+          for apk in sorted(glob.glob("dist/*.apk")):
+            fname = os.path.basename(apk)
+            m = pat.match(fname)
+            if not m:
+              continue
+            key_h, version, arch = m.group(1), m.group(2), m.group(3)
+            marker = "🆕" if key_h in built_keys else "↩"
+            rows.append((key_h, version, arch, marker))
+
+          lines = [
+            "## Morphe + De-ReVanced Apps",
+            "",
+            trigger_line,
+            "🆕 = newly built this run · ↩ = carried over (no change)",
+            "",
+            "| App | Version | Arch | |",
+            "|-----|---------|------|--|",
+          ]
+
+          for key_h, version, arch, marker in rows:
+            lines.append(f"| {key_h} | `{version}` | `{arch}` | {marker} |")
+
+          lines += [
+            "",
+            f"**Morphe:** `{morphe}` · **De-ReVanced:** `{drvr}` · **Piko:** `{piko}` · **hoo-dles:** `{hoodles}` · **CLI:** `{cli}`",
+            f"**Build date:** `{today}`",
+            "",
+            "---",
+            "### Install notes",
+            "- YouTube / YouTube Music: install [ReVanced GmsCore](https://github.com/ReVanced/GmsCore/releases/latest) first",
+            "- All other apps: standalone install, no extra app needed",
+          ]
+
+          with open("release_body.md", "w") as f:
+            f.write("\n".join(lines))
+          PYEOF
+
+      - name: Delete previous auto-build releases
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release list --json tagName -q ".[].tagName" \
+            | grep -E "^(morphe|revanced)-apps-v" \
+            | while read -r tag; do
+                gh release delete "$tag" -y --cleanup-tag || true
+              done
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "morphe-apps-v${{ steps.date.outputs.today }}${{ github.event_name == 'workflow_dispatch' && format('-manual-{0}', github.event.inputs.app) || '' }}"
+          name: "Morphe Apps — ${{ steps.date.outputs.today }}${{ github.event_name == 'workflow_dispatch' && format(' (manual: {0})', github.event.inputs.app) || '' }}"
+          body_path: release_body.md
+          files: dist/*.apk
+          fail_on_unmatched_files: false
+          draft: false
+          prerelease: false
+
+      - name: Save updated state
+        if: github.event_name == 'schedule' || github.event.inputs.app == 'all'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update built versions state [skip ci]"
+          branch: master
+          file_pattern: ".github/last_built_versions.json .github/cert_pins.json"
