@@ -1,13 +1,14 @@
 {
   "cli_tag": "v2.2.0",
-  "morphe_tag": "v2.2.0",
+  "morphe_tag": "v2.3.0",
   "de_revanced_tag": "v1.6.4",
   "de_vanced_tag": "v1.6.4",
-  "piko_tag": "v3.11.1-dev.1 (pre-release)",
+  "piko_tag": "v3.12.0-dev.2 (pre-release)",
   "hoodles_tag": "v1.47.0",
+  "piko_newx_tag": "v3.75.0",
   "youtube": "21.30.216",
   "music": "9.30.53",
   "reddit": "2026.40.0",
-  "twitter": "12.19.1-release.0",
+  "twitter": "12.41.0-prod.01",
   "instagram": "452.1.0.53.64"
 }
